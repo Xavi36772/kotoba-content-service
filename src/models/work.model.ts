@@ -70,30 +70,39 @@ export class WorkModel {
   }
 
   static async incrementViewCount(workId: string, userId: string) {
-    // Use the RPC function
-    const { error } = await supabaseAdmin.rpc('increment_view_count', { row_id: workId });
+    const { data: existing } = await supabaseAdmin
+      .from('work_views')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('work_id', workId)
+      .maybeSingle();
 
-    if (error) {
-      // If the RPC doesn't exist, use the manual approach
-      // Insert into work_views to track unique views
-      const { error: insertError } = await supabaseAdmin
+    if (existing) return;
+
+    const { error: insertError } = await supabaseAdmin
+      .from('work_views')
+      .insert({ user_id: userId, work_id: workId });
+
+    if (insertError) {
+      // If unique constraint violation, it means the view was already counted
+      if (insertError.message?.includes('duplicate key') || insertError.message?.includes('violates unique constraint')) return;
+      throw insertError;
+    }
+
+    const { error: rpcError } = await supabaseAdmin
+      .rpc('increment_view_count', { row_id: workId });
+
+    if (rpcError) {
+      // Fallback: manual count
+      const { count, error: countError } = await supabaseAdmin
         .from('work_views')
-        .upsert({ work_id: workId, user_id: userId }, { onConflict: 'user_id,work_id' });
-
-      if (insertError && !insertError.message?.includes('violates unique constraint')) {
-        // Count unique views
-        const { data } = await supabaseAdmin
-          .from('work_views')
-          .select('*', { count: 'exact', head: true })
-          .eq('work_id', workId);
-
-        // Update the view_count on the works table
-        const count = data?.length ?? 0;
-        await supabaseAdmin
-          .from('works')
-          .update({ view_count: count + 1 })
-          .eq('id', workId);
-      }
+        .select('*', { count: 'exact', head: true })
+        .eq('work_id', workId);
+      if (countError) throw countError;
+      await supabaseAdmin
+        .from('works')
+        .update({ view_count: count || 0 })
+        .eq('id', workId);
     }
   }
 }
