@@ -3,6 +3,7 @@ import { WorkModel } from '../models/work.model';
 import { storeEmbedding } from '../services/embedding.service';
 import { supabaseAdmin } from '../config/supabase';
 import { AuthRequest } from '../middleware/auth.middleware';
+import { NotificationModel } from '../models/notification.model';
 
 const allowedFields = [
   'title', 'description', 'genre', 'cover_url', 'status',
@@ -18,6 +19,41 @@ function sanitize(body: any): any {
     }
   }
   return sanitized;
+}
+
+async function notifyFollowersOnPublish(authorId: string, workId: string, workTitle: string, isNew: boolean) {
+  try {
+    const followerIds = await NotificationModel.getFollowers(authorId);
+    if (followerIds.length === 0) return;
+
+    const items = followerIds
+      .filter((id: string) => id !== authorId)
+      .map((followerId: string) => ({
+        type: 'new_story',
+        title: isNew ? 'Nueva historia publicada' : 'Historia actualizada',
+        body: isNew
+          ? `@${authorId} publicó "${workTitle}"`
+          : `@${authorId} actualizó "${workTitle}"`,
+        data: { workId, authorId, isNew },
+      }));
+
+    if (items.length > 0) {
+      // Insert in batches (Supabase handles bulk insert fine for <1000 rows)
+      await supabaseAdmin.from('notifications').insert(
+        followerIds
+          .filter((id: string) => id !== authorId)
+          .map((followerId: string, i: number) => ({
+            user_id: followerId,
+            type: items[i].type,
+            title: items[i].title,
+            body: items[i].body,
+            data: items[i].data,
+          }))
+      );
+    }
+  } catch (err) {
+    console.error('notifyFollowersOnPublish error:', err);
+  }
 }
 
 export const getWorks = async (req: Request, res: Response): Promise<void> => {
@@ -57,6 +93,10 @@ export const createWork = async (req: Request, res: Response): Promise<void> => 
       console.error('Error storing embedding:', err)
     );
 
+    if (work.status && work.status !== 'draft' && work.author_id) {
+      notifyFollowersOnPublish(work.author_id, work.id, work.title, true).catch(() => {});
+    }
+
     res.status(201).json(work);
   } catch (error) {
     console.error('Error creating work:', error);
@@ -75,6 +115,10 @@ export const updateWork = async (req: Request, res: Response): Promise<void> => 
       storeEmbedding(work.id, work.title, work.description).catch(err =>
         console.error('Error updating embedding:', err)
       );
+    }
+
+    if (workData.status && workData.status !== 'draft' && work.author_id) {
+      notifyFollowersOnPublish(work.author_id, work.id, work.title, false).catch(() => {});
     }
 
     res.json(work);

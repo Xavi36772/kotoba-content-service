@@ -17,6 +17,9 @@ import {
   createBookmark, removeBookmark, getBookmark, getUserBookmarks
 } from '../controllers/bookmark.controller';
 import { searchWorks } from '../controllers/search.controller';
+import {
+  getNotifications, getUnreadCount, markAsRead, markAllAsRead, deleteNotification
+} from '../controllers/notification.controller';
 
 const router = Router();
 
@@ -55,5 +58,12 @@ router.post('/bookmarks/:workId', verifyToken, createBookmark);
 router.delete('/bookmarks/:workId', verifyToken, removeBookmark);
 router.get('/bookmarks/:workId', verifyToken, getBookmark);
 router.get('/bookmarks/mine', verifyToken, getUserBookmarks);
+
+// Notifications
+router.get('/notifications', verifyToken, getNotifications);
+router.get('/notifications/unread-count', verifyToken, getUnreadCount);
+router.put('/notifications/read-all', verifyToken, markAllAsRead);
+router.put('/notifications/:id/read', verifyToken, markAsRead);
+router.delete('/notifications/:id', verifyToken, deleteNotification);
 
 export default router;
